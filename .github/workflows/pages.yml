@@ -1,0 +1,78 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode binary assets
+        run: |
+          if [ -f encoded-assets.tar.b64 ]; then
+            base64 -d encoded-assets.tar.b64 | tar -xf -
+          fi
+
+      - name: Commit decoded binaries and remove encoded tar
+        run: |
+          if [ ! -f assets/fonts/Oswald-var.woff2 ] || [ ! -f assets/fonts/JetBrainsMono-var.woff2 ]; then
+            echo "Decoded assets missing, skip commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/fonts
+          if [ -f encoded-assets.tar.b64 ]; then
+            git rm -f encoded-assets.tar.b64
+          fi
+          if git diff --cached --quiet; then
+            echo "Binaries already committed and encoded tar already removed"
+          else
+            git commit -m "Add decoded font files and remove encoded tar"
+            git push
+          fi
+
+      - name: Try enabling GitHub Pages
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Setup Pages
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+
+      - name: Stage site files
+        run: |
+          mkdir -p /tmp/site/assets
+          cp index.html /tmp/site/
+          cp -f README.txt /tmp/site/ || true
+          touch /tmp/site/.nojekyll
+          cp -a assets/. /tmp/site/assets/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
